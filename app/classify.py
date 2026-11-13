@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 
 import pandas as pd
@@ -189,6 +190,18 @@ def _rule_fallback(subject: str, body: str, severity_hint: str | None = None) ->
     )
 
 
+def _llm_classify_enabled(settings: Settings) -> bool:
+    """Use LLM for batch classification unless disabled or running on Vercel by default."""
+    if not settings.llm_base_url:
+        return False
+    raw = os.environ.get("LLM_CLASSIFY_ENABLED", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return not bool(os.environ.get("VERCEL"))
+
+
 def classify_messages_detailed(df: pd.DataFrame, settings: Settings) -> list[Classification]:
     """Return a ``Classification`` per row of ``df``, using LLM cache + fallback."""
     if df.empty:
@@ -203,7 +216,7 @@ def classify_messages_detailed(df: pd.DataFrame, settings: Settings) -> list[Cla
         else [None] * len(df)
     )
 
-    if not settings.llm_base_url:
+    if not _llm_classify_enabled(settings):
         return [_rule_fallback(s, b, h) for s, b, h in zip(subjects, bodies, hints)]
 
     keys = [_normalized_cache_key(settings.llm_model, s, b) for s, b in zip(subjects, bodies)]

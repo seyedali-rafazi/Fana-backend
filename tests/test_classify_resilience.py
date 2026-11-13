@@ -269,3 +269,51 @@ def test_vercel_and_env_wall_seconds_defaults(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setenv("LLM_CLASSIFY_WALL_SECONDS", "25")
     assert LLMClient(_llm_settings())._max_wall_seconds == 25.0
+
+
+def test_vercel_skips_batch_classify_by_default_while_keeping_draft_llm(
+    sample_csv: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_BASE_URL", "http://llm.test/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("LLM_CLASSIFY_ENABLED", raising=False)
+    drafts._CACHE.clear()
+
+    urls_called: list[str] = []
+    orig_post = httpx.Client.post
+
+    def _fake_post(self: httpx.Client, url: object, **kwargs: object) -> httpx.Response:
+        if "llm.test" not in str(url):
+            return orig_post(self, url, **kwargs)  # type: ignore[arg-type]
+        urls_called.append(str(url))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "سلام، درخواست شما در دست بررسی است."}}]},
+            request=httpx.Request("POST", str(url)),
+        )
+
+    monkeypatch.setattr(httpx.Client, "post", _fake_post)
+
+    with sample_csv.open("rb") as fh:
+        res_analyze = client.post(
+            "/api/analyze",
+            params={"now": "2026-10-26T12:00:00Z"},
+            files={"file": ("export.csv", fh, "text/csv")},
+        )
+    assert res_analyze.status_code == 200
+    assert urls_called == []
+
+    res_draft = client.post(
+        "/api/draft",
+        json={
+            "message_id": "M_VERCEL_DRAFT",
+            "customer_id": "C1",
+            "subject": "سفارش",
+            "body": "سفارشم نرسیده است",
+        },
+    )
+    assert res_draft.status_code == 200
+    assert res_draft.json()["blocked"] is False
+    assert len(urls_called) == 1
