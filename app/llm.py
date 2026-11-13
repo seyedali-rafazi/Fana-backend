@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import re
 import time
@@ -24,7 +25,20 @@ INTER_BATCH_PAUSE_SECONDS = 1.5
 MAX_CLASSIFY_RETRIES = 3
 MAX_RETRY_SLEEP_SECONDS = 10.0
 MAX_CLASSIFY_WALL_SECONDS = 90.0
+VERCEL_CLASSIFY_WALL_SECONDS = 40.0
 MAX_CONSECUTIVE_FAILURES = 2
+
+
+def _default_classify_wall_seconds() -> float:
+    raw = os.environ.get("LLM_CLASSIFY_WALL_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(5.0, float(raw))
+        except ValueError:
+            pass
+    if os.environ.get("VERCEL"):
+        return VERCEL_CLASSIFY_WALL_SECONDS
+    return MAX_CLASSIFY_WALL_SECONDS
 
 SYSTEM_PROMPT = (
     "You classify customer support messages for Bazarcheh, an Iranian online shop. "
@@ -257,7 +271,7 @@ class LLMClient:
         batch_size: int = CLASSIFY_BATCH_SIZE,
         max_retries: int = MAX_CLASSIFY_RETRIES,
         inter_batch_pause: float = INTER_BATCH_PAUSE_SECONDS,
-        max_wall_seconds: float = MAX_CLASSIFY_WALL_SECONDS,
+        max_wall_seconds: float | None = None,
     ) -> None:
         if not settings.llm_base_url:
             raise ValueError("LLM_BASE_URL is not configured")
@@ -270,7 +284,8 @@ class LLMClient:
         self._batch_size = max(1, int(batch_size))
         self._max_retries = max(0, int(max_retries))
         self._inter_batch_pause = max(0.0, float(inter_batch_pause))
-        self._max_wall_seconds = max(5.0, float(max_wall_seconds))
+        effective_wall = _default_classify_wall_seconds() if max_wall_seconds is None else float(max_wall_seconds)
+        self._max_wall_seconds = max(5.0, effective_wall)
 
     def _httpx_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(self._timeout, connect=min(10.0, self._timeout))

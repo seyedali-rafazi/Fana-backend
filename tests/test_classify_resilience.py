@@ -257,3 +257,15 @@ def test_api_analyze_does_not_prefetch_drafts(
 
     assert response.status_code == 200
     assert prefetch_called is False
+
+
+def test_vercel_and_env_wall_seconds_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.delenv("LLM_CLASSIFY_WALL_SECONDS", raising=False)
+    assert LLMClient(_llm_settings())._max_wall_seconds == llm.MAX_CLASSIFY_WALL_SECONDS
+
+    monkeypatch.setenv("VERCEL", "1")
+    assert LLMClient(_llm_settings())._max_wall_seconds == llm.VERCEL_CLASSIFY_WALL_SECONDS
+
+    monkeypatch.setenv("LLM_CLASSIFY_WALL_SECONDS", "25")
+    assert LLMClient(_llm_settings())._max_wall_seconds == 25.0
